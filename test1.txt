@@ -1,0 +1,32 @@
+import tkinter as tk
+
+root = tk.Tk()   # 建立 tkinter 視窗物件
+root.title('卡路里計算器')        # 設定標題
+root.configure(background='#ff7f50')  
+root.iconbitmap('favicon.ico')   # 設定 icon 
+
+window_width = root.winfo_screenwidth()    # 取得螢幕寬度
+window_height = root.winfo_screenheight()  # 取得螢幕高度
+
+width = 600
+height = 400
+left = int((window_width - width)/2)       # 計算左上 x 座標
+top = int((window_height - height)/2)      # 計算左上 y 座標
+root.geometry(f'{width}x{height}+{left}+{top}')
+root.resizable(True, True)
+
+mainlabel = tk.Label(root, text='Calorie Calculator', font = (40)) #主標
+mainlabel.pack(side='left')  # 加入視窗中
+
+sublabel = tk.Label(root, text='此應用程序將幫助您計算以下內容：/n
+    基礎代謝率 (BMR) 和總能量消耗 (TDEE)/n
+    依據運動和活動計算消耗的卡路里/n
+    根據選擇的食物計算攝取的卡路里 請按照以下步驟操作：/n
+    輸入基本的身體資訊和運動強度，計算您的 BMR 和 TDEE。/n
+    上傳運動影片或輸入其他運動資料來計算消耗的卡路里。/n
+    選擇您吃的食物，計算總攝取的卡路里，並查看剩餘的卡路里。 /n運動強度可參考網站:https://reurl.cc/xv6k9V', font = (26))
+subbel.pack(side='left')  # 加入視窗中
+
+
+
+root.mainloop()  # 放在主迴圈中
