@@ -6,6 +6,11 @@ from ultralytics import YOLO, solutions
 from PIL import Image, ImageTk
 import os
 from tkinter import  messagebox
+import mediapipe as mp
+import numpy as np
+mp_drawing = mp.solutions.drawing_utils
+mp_pose = mp.solutions.pose
+
 
 model = YOLO("trained/yolov8n-pose.pt")
 
@@ -51,9 +56,6 @@ def calculate_bmr_tdee():
         # 显示计算结果
         bmr_var.set(f"BMR: {bmr:.2f} kcal")
         tdee_var.set(f"TDEE: {tdee:.2f} kcal")
-        print(tdee)
-        print(tdee_var.get())
-
         root.update()
         group1.update()
 
@@ -98,85 +100,149 @@ def calculate_activities(activity1, video1, activity2, video2, activity3_text, b
     result1 = 0.0
     result2 = 0.0
     result3 = 0.0
-
-    if  activity1 and video1:
-        # cap = cv2.VideoCapture(0)  # Open the default camera (source=0)
-        cap = cv2.VideoCapture(video1)
-        assert cap.isOpened(), "Error reading video file"
+    def calculate_1(activity1, video1):
+        if  activity1 and video1:
+            # cap = cv2.VideoCapture(0)  # Open the default camera (source=0)
+            cap = cv2.VideoCapture(video1)
+            assert cap.isOpened(), "Error reading video file"
         
-        w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT, cv2.CAP_PROP_FPS))
-        #new_fps = 30 
-        video_writer = cv2.VideoWriter("count_yolov8_v1.avi", cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)) 
+            w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT, cv2.CAP_PROP_FPS))
+            #new_fps = 30 
+            video_writer = cv2.VideoWriter("count_yolov8_v1.avi", cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)) 
        
-        if '伏地挺身' in activity1 :
-            gym_object = solutions.AIGym(
-                line_thickness=2,
-                view_img=True,
-                pose_type="pushup",
-                kpts_to_check=[6, 8, 10],
-            )
-            while cap.isOpened():
-                success, im0 = cap.read()
-                if not success:
-                    print("Video frame is empty or video processing has been successfully completed.")
-                    break
-                results = model.track(im0, verbose=False)  # Tracking recommended
-                # results = model.predict(im0)  # Prediction also supported
-                im0 = gym_object.start_counting(im0, results)
-                out_count = gym_object.count
-                print(out_count)
+            def calculate_angle(a,b,c):
+                a = np.array(a) # First
+                b = np.array(b) # Mid
+                c = np.array(c) # End
+    
+                radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
+                angle = np.abs(radians*180.0/np.pi)
+    
+                if angle >180.0:
+                    angle = 360-angle
+                return angle 
 
-                # Ensure the directory exists
-                os.makedirs("json", exist_ok=True)
-                try:
-                    with open("json/save_data.json", "w") as f:
-                         json.dump({"count": out_count}, f)
-                    print("Results saved to JSON.") 
-                except Exception as e:
-                    print(f"Error saving JSON: {e}")
-                video_writer.write(im0)
+            # Curl counter variables
+            counter = 0 
+            stage = None
+
+            ## Setup mediapipe instance
+            with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        print("无法读取视频帧或视频流已结束")
+                        break 
+                    # Recolor image to RGB
+                    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    image.flags.writeable = False
+      
+                    # Make detection
+                    results = pose.process(image)
+    
+                    # Recolor back to BGR
+                    image.flags.writeable = True
+                    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+                    # Extract landmarks
+                    try:
+                        landmarks = results.pose_landmarks.landmark
+            
+                        # Get coordinates
+                        shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x,landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+                        elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x,landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+                        wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x,landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+                        hip = [landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].x, landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y]
+ 
+                        # Calculate angle # elbow
+                        # target = elbow            
+                        # angle = calculate_angle(shoulder, target, wrist)
+
+                        # Calculate angle # hip
+                        target = shoulder
+                        angle = calculate_angle(hip, target, elbow)
+
+                        # Curl counter logic
+                        if angle > 70:
+                            stage = "up"
+                        if angle < 30 and stage =='up':
+                            stage="down"
+                            counter +=1
+                            print(counter)
+
+                        # Visualize angle
+                        # Adjust text color based on angle
+                        if angle > 90:
+                            color = (0, 0, 255)  # Red for large angles
+                        else:
+                            color = (120, 120, 120)  # Grey for smaller angles
+                        cv2.putText(image, str(angle), 
+                                        tuple(np.multiply(target, [640, 480]).astype(int)), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA
+                                            )
+
+                        # # Curl counter logic
+                        # if angle > 160:
+                        #     stage = "down"
+                        # if angle < 30 and stage =='down':
+                        #     stage="up"
+                        #     counter +=1
+                        #     print(counter)
+ 
+                    except:
+                        pass
+        
+                    # Render curl counter
+                    # Setup status box
+                    cv2.rectangle(image, (0,0), (225,73), (245,117,16), -1)
+        
+                    # Rep data
+                    cv2.putText(image, 'REPS', (15,12), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1, cv2.LINE_AA)
+                    cv2.putText(image, str(counter), 
+                                (10,60), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 2, (255,255,255), 2, cv2.LINE_AA)
+        
+                    # Stage data
+                    cv2.putText(image, 'STAGE', (120,12), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1, cv2.LINE_AA)
+                    cv2.putText(image, stage, 
+                                (120,60), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
+
+        
+                    # Render detections (Adjust drawing position)
+                    mp_drawing.draw_landmarks(
+                                        image, 
+                                        results.pose_landmarks, 
+                                        mp_pose.POSE_CONNECTIONS,  # 连接线
+                                        landmark_drawing_spec=mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=2),  # 关键点样式
+                                        connection_drawing_spec=mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)  # 连接线样式
+                                    )
+                
+                    cv2.imshow('Mediapipe Feed', image)
+                    video_writer.write(image)
+
+                    if cv2.waitKey(10) & 0xFF == ord('q'):
+                        break
+
             cap.release()
             video_writer.release()
-            
-            # 讀取JSON檔案
-            def load_result1():
-                # 打開並讀取JSON文件
-                    try:
-                        with open('json/save_data.json', 'r', encoding='utf-8') as file:
-                            data = json.load(file)
-                            count = data.get("count", 0)
-                            # 如果 count 是列表，处理列表中的数据
-                            if isinstance(count, list):
-                                if len(count) == 0:
-                                    raise ValueError("count list is empty")
-                                else:
-                                     # 这里我们假设要取列表的第一个元素
-                                    count = count[0]
-                                    print(f"count is a list, taking the first value: {count}")
-             
-                            # 确保 count 是数值类型，如果是字符串则尝试转换为浮点数
-                            if isinstance(count, str):
-                                try:
-                                    count = float(count)
-                                except ValueError:
-                                    raise ValueError(f"Invalid string value for count: {count}")
-                            elif not isinstance(count, (int, float)):
-                                raise ValueError(f"Invalid data type for count: {type(count)}")
-            
-                            # 计算结果
-                            result = 0.4 * count
-                            return result
-        
-                    except Exception as e:
-                        print(f"Error reading JSON: {e}")
-                        return 0.0
-            result1 = load_result1()
-        else:
-            result1 = 1000.0
+            cv2.destroyAllWindows()
 
         
-    if activity2 and video2:
-        result2 = 100.0  # Example value
+            result1 = counter * 0.4
+            return result1 
+
+        else:
+            result1 = 0.0
+
+    def calculate_2(activity2, video2):    
+        if activity2 and video2:
+            result2 = 100.0  # Example value
+            return result2
+        else:
+            result2 = 0.0
     
     
      # 处理活动3和消耗热量
@@ -212,6 +278,8 @@ def calculate_activities(activity1, video1, activity2, video2, activity3_text, b
         #tk.messagebox.showinfo("計算結果", f"總消耗熱量: {result3 } kcal")
         return result3
     
+    result1 = calculate_1(activity1, video1)
+    result2 = calculate_2(activity2, video2)
     result3 = calculate_activity3_and_burn(activity3_text, burn3_text)
     total = result1 + result2 + result3 
     
@@ -243,8 +311,9 @@ def browse_file(entry):
 # 食物计算函数
 def calculate_food():
     try:
-        tdee_float = float(tdee_var.get().split(":")[1].strip())  # 临时变量保存浮点值
-        total_float = float(total_var.get().split(":")[1].strip())  # 临时变量保存浮点值
+        tdee_float = float(tdee_var.get().split(":")[1].split()[0])  # 临时变量保存浮点值
+        total_str = total_var.get()
+        total_float = float(total_str)
         selected_meals = [meal for meal, var in meal_vars.items() if var.get()]
         selected_drinks = [drink for drink, var in drink_vars.items() if var.get()]
 
@@ -268,6 +337,7 @@ def create_checkbuttons(frame, options, columns= 8, var_dict=None):
         if var_dict is not None:
             var_dict[option] = var
         tk.Checkbutton(frame, text=option, variable=var, bg='#E7D4B5', fg='#603F26', font=('Arial', 9)).grid(row=row, column=column, padx=5, pady=5, sticky='w')
+
 
 # 创建主窗口
 root = tk.Tk()
@@ -329,7 +399,7 @@ tk.Label(group1, textvariable=bmr_var, bg='#E7D4B5', fg='#603F26', font=('Arial'
 tdee_var = tk.StringVar(value="")
 tk.Label(group1, textvariable=tdee_var, bg='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold')).grid(row=6, column=0, columnspan=2, sticky='w')
 
-tk.Button(group1, text="Calculate BMR/TDEE", bg='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold'), command=calculate_bmr_tdee).grid(row=7, column=0, columnspan=2)
+tk.Button(group1, text="Calculate BMR/TDEE", bg='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold'), command=calculate_bmr_tdee).grid(row=9, column=0, columnspan=2)
 
 
 
@@ -338,7 +408,7 @@ group_videos = tk.LabelFrame(root, text='影像回顧', padx=20, pady=20, backgr
 group_videos.grid(row=1, column=1, sticky='nsew')  # 布局，放置在网格的第2行，第0列
 
 # 创建视频2的标签及显示区域
-tk.Label(group_videos, text="YOLOv8 Video 2:", bg='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold')).grid(row=0, column=0)
+tk.Label(group_videos, text="YOLOv8 Video1 :", bg='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold')).grid(row=0, column=0)
 video1_label = tk.Label(group_videos)  # 用于显示视频1的帧
 video1_label.grid(row=0, column=1)  # 放置在网格的第1行，第0列
 
@@ -427,7 +497,7 @@ group3_1.grid(row=0, column=0, padx=10, pady=10, sticky='w')
 meal_vars = {}  # 存储主餐 Checkbutton 的变量
 
 tk.Label(group3_1, text="主餐:", bg='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold')).grid(row=0, column=0, sticky='w')
-create_checkbuttons(group3_1, food_data["meals"], columns=8, var_dict=meal_vars)
+create_checkbuttons(group3_1, food_data["meals"], columns=3, var_dict=meal_vars)
 
 # 饮料部分
 group3_2 = tk.LabelFrame(group3, text='饮料', padx=20, pady=20, background='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold'), relief='raised', bd=2)
@@ -449,3 +519,4 @@ tk.Label(group3, textvariable=less_var, bg='#E7D4B5', fg='#603F26', font=('Arial
 
 tk.Button(group3, text="Calculate Food", bg='#E7D4B5', fg='#603F26', font=('Arial', 9, 'bold'), command=calculate_food).grid(row=0, column=2, columnspan=2)
 root.mainloop()
+
